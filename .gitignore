@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 编辑器与系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 本地个人配置与状态（技能运行时写在用户目录，不应入库；此处兜底）
+auth-status.json
+saved_login*
+preferences.json

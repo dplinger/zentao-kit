@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>禅道套件 · 账号授权</title><style nonce="${nonce}">
+*{box-sizing:border-box} body{margin:0;min-height:100vh;background:#f3f6fb;color:#18243b;
+font-family:"Segoe UI","Microsoft YaHei",sans-serif;display:grid;place-items:center;padding:32px 20px}
+.shell{width:100%;max-width:460px} .brand{display:flex;align-items:center;gap:12px;margin-bottom:25px}
+.mark{width:42px;height:42px;background:#285be7;border-radius:13px;color:white;display:grid;place-items:center;font-size:23px;font-weight:700}
+.brand strong{font-size:17px} .brand small{display:block;color:#69768d;font-size:12px;margin-top:4px}
+.card{background:white;border:1px solid #e2e8f1;border-radius:22px;padding:32px;box-shadow:0 16px 48px #21365b0a}
+.eyebrow{font-size:12px;font-weight:600;color:#285be7;margin:0 0 12px;letter-spacing:1px}
+h1{font-size:26px;letter-spacing:-.6px;margin:0 0 12px} .intro{color:#66738a;font-size:14px;line-height:1.8;margin:0 0 24px}
+.site{padding:13px 15px;border:1px solid #e6ebf3;background:#f8faff;border-radius:10px;margin-bottom:25px}
+.site small{display:block;color:#69768d;font-size:12px;margin-bottom:6px} .site span{font-size:13px;overflow-wrap:anywhere}
+label{display:block;font-size:13px;font-weight:600;margin:18px 0 8px} input:not([type=hidden]){width:100%;height:46px;
+border:1px solid #cfd8e6;border-radius:9px;padding:0 13px;font:inherit;font-size:14px;background:white;color:#18243b}
+input::placeholder{color:#94a0b3} input:focus-visible{outline:3px solid #285be725;border-color:#285be7}
+button{width:100%;border:0;border-radius:9px;background:#285be7;color:white;padding:14px;margin-top:24px;font:inherit;
+font-size:14px;font-weight:600;cursor:pointer} button:hover{background:#194bd1} button:focus-visible{outline:3px solid #91b0ff;outline-offset:3px}
+.hint{text-align:center;font-size:12px;color:#758198;line-height:1.7;margin:14px 0 0}
+.password-field{position:relative} .password-field input{padding-right:48px}
+.password-toggle{position:absolute;right:5px;top:5px;width:36px;height:36px;margin:0;padding:8px;background:transparent;color:#69768d}
+.eye-slash{display:none} .password-toggle[aria-pressed="true"] .eye-slash{display:block}
+.password-toggle:hover{background:#edf2fb} .password-toggle svg{display:block;width:20px;height:20px}
+.privacy{margin-top:25px;padding-top:20px;border-top:1px solid #edf0f5;font-size:12px;color:#758198;line-height:1.9}
+.privacy strong{display:block;color:#42516a;margin-bottom:4px;font-weight:500}
+.notice{padding:13px 15px;border-radius:9px;font-size:13px;line-height:1.7;margin-bottom:18px}
+.success{background:#ecf8f1;color:#176044} .error{background:#fff3ec;color:#923c18}
+.next{font-size:14px;color:#52617a;line-height:1.8} footer{text-align:center;font-size:12px;color:#8490a3;margin-top:22px;line-height:1.8}
+.next[data-auto-close="true"]{text-align:center;font-weight:700}
+.done .card{text-align:center}
+@media(max-width:480px){body{padding:24px 16px}.card{padding:25px 22px}h1{font-size:23px}}
+</style></head><body><main class="shell">
+<div class="brand"><div class="mark" aria-hidden="true">禅</div><div><strong>禅道套件</strong><small>让工作记录更轻松</small></div></div>
+<section class="card" aria-labelledby="title"><p class="eyebrow">账号授权</p><h1 id="title">${title}</h1>
+<p class="intro">连接公司禅道，用对话整理工作、预览日志。<br>每次登记前，都会请您确认最终内容。</p>
+<div class="site"><small>即将连接的公司站点</small><span>${base}</span></div>
+<!-- 动态文本由 auth.py 转义；展示状态由授权结果控制。 -->
+<div class="notice ${notice_class}" role="status" ${notice_hidden}>${message}</div>
+<form method="post" action="/${nonce}" ${form_hidden}>
+  <input type="hidden" name="csrf" value="${nonce}">
+  <label for="account">禅道账号</label>
+  <input id="account" name="account" autocomplete="username" placeholder="请输入公司禅道账号" required autofocus ${disabled}>
+  <label for="password">登录密码</label>
+  <div class="password-field">
+    <input id="password" name="password" type="password" autocomplete="current-password" placeholder="请输入禅道登录密码" required ${disabled}>
+    <button id="toggle-password" class="password-toggle" type="button" aria-label="显示密码" aria-controls="password" aria-pressed="false" title="显示密码" ${disabled}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="eye-slash" d="m3 3 18 18"/></svg>
+    </button>
+  </div>
+  <button type="submit" ${disabled}>授权并继续</button>
+  <p class="hint">授权后，请返回 AI 对话继续操作。</p>
+</form>
+<p id="next-message" class="next" data-auto-close="${auto_close}" ${next_hidden}>${next_message}</p>
+<div class="privacy"><strong>密码仅用于本次身份验证</strong>
+密码通过加密连接发送至公司禅道，不保存、不写入 AI 对话。授权凭证由技能保存在本机。</div></section>
+<footer>这是技能在您电脑上提供的临时授权页<br>登录完成后服务自动退出，未完成时 10 分钟后到期</footer>
+</main>
+<script nonce="${nonce}">
+// 不通过表单导航增加历史记录，提高普通标签页自动关闭的兼容性。
+const loginForm = document.querySelector('form');
+const passwordInput = document.getElementById('password');
+const togglePassword = document.getElementById('toggle-password');
+const submitButton = loginForm.querySelector('button[type="submit"]');
+// 显示状态仅在本页切换，眼睛按钮不提交表单，也不改变密码值。
+togglePassword.addEventListener('click', () => {
+  const visible = passwordInput.type === 'password';
+  passwordInput.type = visible ? 'text' : 'password';
+  togglePassword.setAttribute('aria-pressed', String(visible));
+  togglePassword.setAttribute('aria-label', visible ? '隐藏密码' : '显示密码');
+  togglePassword.title = visible ? '隐藏密码' : '显示密码';
+});
+// Enter 走标准表单校验与提交，不写入密码；输入法确认和长按不重复提交。
+loginForm.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || event.target.tagName !== 'INPUT') return;
+  if (event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  if (!event.repeat && !submitButton.disabled) loginForm.requestSubmit(submitButton);
+});
+// 使用浏览器原生表单提交。部分桌面宿主会拦截 localhost 的 fetch，导致服务端已经
+// 收到页面却无法把结果回显；原生 POST 可直接渲染服务端返回的成功或失败页面。
+if (!loginForm.hidden) loginForm.addEventListener('submit', () => {
+  submitButton.disabled = true;
+});
+
+// 浏览器只允许脚本关闭自己 window.open 出来的标签页；本页由系统浏览器直接打开，
+// window.close() 通常静默失效且不抛异常。因此关不掉时把页面收成一句确认，
+// 既清掉表单与隐私说明，也让标签标题一眼可见「已完成」。
+function simplify() {
+  document.title = '✅ 已登录，可关闭本页';
+  document.body.classList.add('done');
+  document.querySelector('main.shell').innerHTML =
+    '<section class="card"><p class="eyebrow">账号授权</p><h1>登录成功</h1>' +
+    '<div class="notice success">已保存登录凭证，这个标签页可以关掉了。</div></section>';
+}
+
+// 仅成功页倒计时；先尝试自动关闭，关不掉再简化页面。
+function startCountdown() {
+  const nextMessage = document.getElementById('next-message');
+  if (nextMessage.dataset.autoClose !== 'true') return;
+  const deadline = Date.now() + 4000;
+  const timer = setInterval(() => {
+    const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    nextMessage.textContent = '即将自动关闭页面 ' + seconds + ' 秒';
+    if (seconds === 0) {
+      clearInterval(timer);
+      try { window.close(); } catch (_) { /* 关闭被拒时下面的定时器仍会简化页面。 */ }
+      // 真正关掉时脚本上下文随之销毁，这个回调不会执行；仍在则说明没关成。
+      setTimeout(simplify, 300);
+    }
+  }, 1000);
+}
+startCountdown();
+</script></body></html>
