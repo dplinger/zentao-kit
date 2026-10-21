@@ -26,6 +26,8 @@ SPECS = {
         'view': '/product-view-{id}.html',
         'defaults': {'acl': 'private'},
         'skip_verify': ('whitelist',),
+        # 只监控归属、负责人、类型和状态，避免普通字段规范化造成写后误报。
+        'monitor_fields': ('program', 'line', 'PO', 'QD', 'RD', 'type', 'status'),
         'notices': {'create': '产品代号 code 是否必填由站点设置决定；站点要求而本次未填时，'
                               '服务端会提示，按提示补填。'},
         'fields': {
@@ -51,6 +53,8 @@ SPECS = {
         'view': '/project-view-{id}.html',
         'defaults': {'acl': 'private', 'model': 'scrum'},
         'skip_verify': ('whitelist',),
+        # 只保护产品与项目集归属、负责人、研发模型和访问模式等核心配置。
+        'monitor_fields': ('products', 'parent', 'PM', 'model', 'multiple', 'acl'),
         'notices': {'create': '项目集用 parent 指定（接口里 program 参数会被 parent 覆盖）；'
                               '未指定 model 时按 scrum 创建；多迭代项目用 multiple=on，不填即单迭代。'},
         'fields': {
@@ -84,6 +88,8 @@ SPECS = {
         'view': '/execution-view-{id}.html',
         'defaults': {'acl': 'private'},
         'skip_verify': ('whitelist',),
+        # 只保护项目归属、父执行、关联产品、状态、负责人和访问模式。
+        'monitor_fields': ('project', 'parent', 'products', 'status', 'PM', 'acl'),
         'notices': {'create': '执行建在指定项目下（project 走路径参数）；关联产品用 products'
                               '（编号数组），不填由服务端沿用项目已关联的产品。'},
         'fields': {

@@ -11,13 +11,16 @@ from common import (actions_dir, SkillError, digest, missing_error, move_to_tras
 FIELDS = ('name', 'type', 'assignedTo', 'estStarted', 'deadline', 'pri', 'estimate', 'module', 'story', 'desc')
 TYPES = {'design', 'devel', 'request', 'test', 'study', 'discuss', 'ui', 'affair', 'misc'}
 LABELS = {'create': '新建任务', 'update': '修改任务', 'finish': '完成任务', 'close': '关闭任务'}
+# 修改任务不应改变的稳定字段；请求本身包含的字段仍按用户期望值核对。
+UPDATE_INVARIANTS = ('project', 'execution', 'status', 'assignedTo', 'estimate', 'left', 'consumed')
 
 
-def detail(client, task):
+def detail(client, task, version='v1'):
+    """读取任务详情；修改任务时使用与写接口一致的 V2 字段结构。"""
     from zentao import ident
     task = ident(task)
     try:
-        value = client.call('GET', f'v1/tasks/{task}')
+        value = client.call('GET', f'{version}/tasks/{task}')
     except SkillError as exc:
         raise (missing_error(exc, '任务', task) or exc) from None
     value = value.get('task', value) if isinstance(value, dict) else {}
@@ -89,10 +92,16 @@ def prepare(plan, client, source_path=None):
             if not requested or set(requested) - set(FIELDS):
                 raise SkillError('修改任务必须指定支持的字段。')
             # PUT 按用户示例发送完整字段，未要求修改的值从实时详情保留。
-            body = {key: field(before, key) for key in FIELDS}
+            update_before = detail(client, task, 'v2')
+            body = {key: field(update_before, key) for key in FIELDS}
+            # 禅道会以 null 返回未设置的可选日期，写接口使用空字符串保留其空值。
+            for key in ('estStarted', 'deadline'):
+                if body[key] is None:
+                    body[key] = ''
             body.update(requested)
-            if any(value is None for value in body.values()):
-                raise SkillError('任务详情缺少修改接口需要的字段，不能用空值覆盖；请核对接口。')
+            missing = [key for key, value in body.items() if value is None]
+            if missing:
+                raise SkillError(f'任务详情缺少修改接口需要的字段：{", ".join(missing)}；不能用空值覆盖，请核对接口。')
         else:
             body = requested.copy()
         if action == 'finish' and before.get('status') not in ('wait', 'doing', 'pause'):
@@ -119,12 +128,19 @@ def matches(actual, expected, key):
     value = field(actual, key)
     if key in ('estStarted', 'deadline', 'realStarted', 'finishedDate'):
         return str(value or '')[:10] == str(expected or '')[:10] or not expected and str(value).startswith('0000-00-00')
-    if key in ('estimate', 'pri', 'module', 'story'):
+    if key in ('project', 'execution', 'estimate', 'left', 'consumed', 'pri', 'module', 'story'):
         try:
             return float(value or 0) == float(expected or 0)
         except (TypeError, ValueError):
             return False
     return value == expected
+
+
+def drifted_fields(before, actual, requested):
+    """返回修改任务后发生意外变化的稳定字段。"""
+    return [key for key in UPDATE_INVARIANTS
+            if key not in requested and key in before
+            and not matches(actual, field(before, key), key)]
 
 
 def execute(review, confirmation, client):
@@ -157,10 +173,17 @@ def execute(review, confirmation, client):
             private_write(receipt_path, {'status': 'inflight', 'action': action, 'task': task})
             actual = detail(client, task)
             if action in ('create', 'update'):
-                expected = body if action == 'create' else snapshot['requested']
-                valid = all(matches(actual, value, key) for key, value in expected.items() if key != 'executionID')
+                failed = [key for key, value in body.items()
+                          if key != 'executionID' and not matches(actual, value, key)]
+                if failed:
+                    raise SkillError('回查发现以下完整提交字段不一致：' + '、'.join(failed) + '。')
+                valid = True
                 if action == 'create':
                     valid = valid and str(field(actual, 'execution')) == str(body['executionID'])
+                else:
+                    drifted = drifted_fields(snapshot['before'], actual, snapshot['requested'])
+                    if drifted:
+                        raise SkillError('修改任务后以下未请求字段被改变：' + '、'.join(drifted) + '。')
             elif action == 'finish':
                 valid = actual.get('status') == 'done' and all(matches(actual, body[k], k) for k in ('assignedTo', 'realStarted', 'finishedDate'))
                 valid = valid and hours(actual.get('consumed', -1)) == hours(snapshot['before']['consumed']) + hours(body['currentConsumed'])
@@ -168,6 +191,9 @@ def execute(review, confirmation, client):
                 valid = actual.get('status') == 'closed'
             if not valid:
                 raise SkillError('回查结果与请求不一致。')
+        except SkillError as exc:
+            private_write(receipt_path, {'status': 'unknown', 'action': action, 'task': task})
+            raise SkillError(f'{exc} 已保留操作记录；请只读核对禅道，禁止自动重发。') from None
         except Exception:
             private_write(receipt_path, {'status': 'unknown', 'action': action, 'task': task})
             raise SkillError('任务操作结果未完整核验，已保留操作记录。请只读核对禅道，禁止自动重发。') from None

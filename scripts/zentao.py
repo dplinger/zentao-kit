@@ -618,8 +618,7 @@ def main():
     p.add_argument('--all', action='store_true', help='列出全部命中记录')
     for entity, label in (('product', '产品'), ('project', '项目'), ('execution', '执行'),
                           ('testtask', '测试单'), ('testcase', '用例')):
-        p = sub.add_parser(f'{entity}-prepare', help=f'预览新建{label}'
-                           + ('或修改' if entity != 'testtask' else '（接口不支持修改）'))
+        p = sub.add_parser(f'{entity}-prepare', help=f'预览新建或修改{label}')
         p.add_argument('--plan', required=True)
         p = sub.add_parser(f'{entity}-submit', help=f'确认{label}预览后执行一次并回查')
         p.add_argument('--review', required=True)

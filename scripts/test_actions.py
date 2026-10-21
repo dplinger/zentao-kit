@@ -28,7 +28,7 @@
 **测试单的创建与修改均已真实跑通**：创建走 v1、修改走 v2，回查字段一致。
 """
 
-from actions import (ACCOUNT, BOTH, CREATE, DATE, ENUM, ID, INT, STEPS, TEXT, UPDATE,
+from actions import (ACCOUNT, BOTH, CREATE, DATE, ENUM, ID, INT, STEPS, TEXT, TEXTS, UPDATE,
                      execute as _execute, prepare as _prepare)
 from bug_actions import builds as list_builds
 from common import SkillError
@@ -44,6 +44,10 @@ SPECS = {
         'update_endpoint': 'v2/testtasks/{id}',
         # v2 的 PUT 是整份覆盖：必填项缺一即报错，未传的非必填项会被**静默清空**，故用详情铺满。
         'update_fill': True,
+        # 补齐的旧值同样属于本次覆盖内容，写后必须逐项确认没有被服务端改写或清空。
+        'verify_full_body': True,
+        # 关联与负责人是测试单最关键的归属信息，额外作为未请求字段检查的明确契约。
+        'monitor_fields': ('project', 'product', 'execution', 'build', 'owner'),
         # v2 文档把产品写成 productID（实测 v1 的 product 也认，但以文档为准更稳）。
         'update_wire': {'product': 'productID'},
         'view': '/testtask-view-{id}.html',
@@ -62,7 +66,7 @@ SPECS = {
             'begin': {'type': DATE, 'required': BOTH},
             'end': {'type': DATE, 'required': BOTH},
             'owner': {'type': ACCOUNT},
-            'type': {'type': TEXT},
+            'type': {'type': TEXTS},
             'pri': {'type': ENUM, 'values': ('1', '2', '3', '4')},
             # v2 文档给出的取值；服务端对非法值会拒绝，本地先拦一道。
             # 刻意不含 closed：它对测试单是死状态（记录从所有列表消失、页面渲染异常），关闭用 done。
@@ -80,6 +84,8 @@ SPECS = {
         'view': '/testcase-view-{id}.html',
         # 用例步骤：接口对步骤字段的命名在版本间不一致，回查不逐条比对，避免误报。
         'skip_verify': ('steps',),
+        # 只保护产品、模块和需求关联；普通内容字段由本次请求核验即可。
+        'monitor_fields': ('product', 'module', 'story'),
         'notices': {'create': '用例必须给产品、标题、类型、优先级和步骤；product 走请求体'
                               '（路径式会被判成无权）。',
                     'update': '提交的是整份步骤：给出 steps 会整体替换原步骤，未给出则保持原样。'},

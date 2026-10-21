@@ -5,8 +5,8 @@
 
 约定（都来自实测的接口行为）：
   - 关联编号一律在预览阶段预检存在：接口对写错的编号未必报错（D7）。
-  - 回查**只核对本次请求的字段**：这些实体有大量服务端派生字段（进度、工时、子项统计），
-    逐项核对未请求字段必然误报。
+  - 回查核对本次请求的字段；实体还可用 `monitor_fields` 声明修改时必须保持不变的关键字段。
+    不检查未声明的派生字段（进度、工时、子项统计），避免无关变化造成误报。
   - 比对一律放宽（日期去分隔符、关联编号取子集）：同一字段在不同端点、不同形态间的
     表达方式并不统一（C7、C9）。
 """
@@ -18,8 +18,8 @@ import re
 from common import (actions_dir, SkillError, brief, digest, missing_error, move_to_trash,
                     plain_text, private_write, read_json, rich_text, stamp, state_dir)
 
-TEXT, DATE, ID, IDS, ACCOUNT, ACCOUNTS, ENUM, INT, STEPS = (
-    'text', 'date', 'id', 'ids', 'account', 'accounts', 'enum', 'int', 'steps')
+TEXT, TEXTS, DATE, ID, IDS, ACCOUNT, ACCOUNTS, ENUM, INT, STEPS = (
+    'text', 'texts', 'date', 'id', 'ids', 'account', 'accounts', 'enum', 'int', 'steps')
 BOTH, CREATE, UPDATE = ('create', 'update'), ('create',), ('update',)
 ACTION_LABEL = {'create': '新建', 'update': '修改'}
 STEP_TYPES = ('step', 'item', 'group')
@@ -84,6 +84,13 @@ def convert(name, meta, value):
         if not isinstance(value, str):
             raise SkillError(f'{name} 必须是文本。')
         return rich_text(value) if name in ('desc', 'precondition') else value
+    if kind == TEXTS:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (list, tuple)) and all(isinstance(item, str) and item.strip()
+                                                    for item in value):
+            return [item.strip() for item in value]
+        raise SkillError(f'{name} 必须是文本或文本数组。')
     if kind == DATE:
         try:
             return dt.date.fromisoformat(str(value)).isoformat()
@@ -197,6 +204,12 @@ def loose_numbers(value):
     if value is None:
         return set()
     if isinstance(value, dict):
+        # 实体对象只取明确的 id，避免把名称里的版本号等数字误当成关联编号。
+        if value.get('id') is not None:
+            return loose_numbers(value['id'])
+        numeric_keys = {int(key) for key in value if str(key).isdigit()}
+        if numeric_keys:
+            return numeric_keys
         found = set()
         for item in value.values():
             found |= loose_numbers(item)
@@ -226,6 +239,11 @@ def matches(actual, expected, key, meta):
         return set(expected) <= loose_numbers(value)
     if kind == ACCOUNTS:
         return {str(name) for name in expected} <= {part for part in re.split(r'[,\s]+', str(value or '')) if part}
+    if kind == TEXTS:
+        def values(item):
+            items = item if isinstance(item, (list, tuple)) else str(item or '').split(',')
+            return {str(part).strip() for part in items if str(part).strip()}
+        return values(value) == values(expected)
     if kind == STEPS:
         rows = value if isinstance(value, list) else []
         got = [(str(row.get('desc') or '').strip(), str(row.get('expect') or '').strip())
@@ -234,8 +252,50 @@ def matches(actual, expected, key, meta):
     return str(value or '').strip() == str(expected or '').strip()
 
 
+def monitor_fields(spec):
+    """校验并返回实体声明的稳定字段，配置错误必须在写入前暴露。"""
+    fields = tuple(spec.get('monitor_fields', ()))
+    unknown = [key for key in fields if key not in spec['fields']]
+    if unknown:
+        raise SkillError(f'{spec["label"]}的 monitor_fields 含未声明字段：'
+                         + '、'.join(unknown) + '。')
+    return fields
+
+
+def unchanged(before, actual, key, meta):
+    """按字段语义判断修改前后是否一致；关联编号数组必须集合完全相等。"""
+    expected = field(before, key)
+    if meta['type'] == IDS:
+        return loose_numbers(expected) == loose_numbers(field(actual, key))
+    return matches(actual, expected, key, meta)
+
+
+def drifted_fields(spec, before, actual, requested):
+    """返回修改后意外变化的稳定字段；只检查实体显式声明的 monitor_fields。"""
+    drifted = []
+    for key in monitor_fields(spec):
+        if key in requested:
+            continue
+        meta = spec['fields'][key]
+        expected = field(before, key)
+        # 详情接口没有返回该字段时无法形成可靠基线，跳过以免误报。
+        if expected is None:
+            continue
+        if not unchanged(before, actual, key, meta):
+            drifted.append(key)
+    return drifted
+
+
+def verification_fields(spec, action, body, requested):
+    """返回写后要核验的字段；整份覆盖型修改核验实际提交的全部业务字段。"""
+    candidates = body if action == 'update' and spec.get('verify_full_body') else requested
+    return [key for key in candidates
+            if key in spec['fields'] and key not in spec.get('skip_verify', ())]
+
+
 def prepare(plan, client, spec, entity, source_path=None):
     """保存绑定账号与远端版本的操作预览，绝不写入禅道。"""
+    monitor_fields(spec)
     action = plan.get('action')
     if action not in ACTION_LABEL or not isinstance(plan.get('fields'), dict):
         raise SkillError('需指定 create 或 update 以及 fields 对象。')
@@ -267,6 +327,7 @@ def prepare(plan, client, spec, entity, source_path=None):
     snapshot = {'entity': entity, 'action': action, 'account': client.account,
                 'base_url': client.base, 'target': target, 'body': body,
                 'requested': sorted(plan['fields']),
+                'before': before,
                 'before_digest': digest(before) if before else None}
     if source_path:
         snapshot.update(source_path=str(Path(source_path).resolve()), source_digest=digest(plan))
@@ -304,8 +365,11 @@ def execute(review, confirmation, client, specs):
             raise SkillError('草稿已修改，请重新预览。')
         spec = specs[snapshot['entity']]
         action, target, body = snapshot['action'], snapshot['target'], snapshot['body']
+        if action == 'update' and not isinstance(snapshot.get('before'), dict):
+            raise SkillError('该修改预览由旧版骨架生成，缺少稳定字段快照，请重新生成预览。')
         if target is not None and digest(detail(client, spec, target)) != snapshot['before_digest']:
             raise SkillError(f'{spec["label"]}自预览后发生变化，请重新生成预览。')
+        submitted_body = body
         if action == 'create':
             method = 'POST'
             endpoint = spec['collection']
@@ -319,11 +383,12 @@ def execute(review, confirmation, client, specs):
             endpoint = (spec.get('update_endpoint') or spec['detail']).format(id=target)
             # 同一实体在 v1/v2 的字段名可能不同（测试单：v1 认 product，v2 文档写 productID）。
             if spec.get('update_wire'):
-                body = {(spec['update_wire'].get(key, key)): value for key, value in body.items()}
+                submitted_body = {(spec['update_wire'].get(key, key)): value
+                                  for key, value in body.items()}
         private_write(receipt, {'status': 'inflight', 'entity': snapshot['entity'],
                                 'action': action, 'target': target})
         try:
-            response = client.call(method, endpoint, body)
+            response = client.call(method, endpoint, submitted_body)
             if not isinstance(response, dict):
                 raise SkillError('写接口未返回有效响应。')
             if action == 'create':
@@ -337,12 +402,16 @@ def execute(review, confirmation, client, specs):
                 raise SkillError('写接口返回的编号与请求不一致，结果不明。')
             actual = detail(client, spec, target)
             # skip_verify 用于「服务端表达方式与请求形态差异过大、核对必然误报」的字段。
-            keys = [key for key in snapshot['requested']
-                    if key in spec['fields'] and key not in spec.get('skip_verify', ())]
+            keys = verification_fields(spec, action, body, snapshot['requested'])
             failed = [key for key in keys
                       if not matches(actual, body[key], key, spec['fields'][key])]
             if failed:
                 raise SkillError('回查发现以下字段与请求不一致：' + '、'.join(failed) + '。')
+            if action == 'update':
+                drifted = drifted_fields(spec, snapshot['before'], actual,
+                                         set(snapshot['requested']))
+                if drifted:
+                    raise SkillError('修改后以下未请求字段被改变：' + '、'.join(drifted) + '。')
         except SkillError as exc:
             private_write(receipt, {'status': 'unknown', 'entity': snapshot['entity'],
                                     'action': action, 'target': target})
