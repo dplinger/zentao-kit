@@ -1,9 +1,15 @@
 ---
 name: zentao-kit
-display_name: 禅道套件
-display_name_en: ZenTao Kit
 description: 禅道套件——用 AI 在禅道里办日常工作的整套能力。采集本机 AI 对话或用户提供的工作记录，生成预览并在用户确认后登记禅道日志。用户说「生成上周日志」「写日志」「补日志」「写禅道日志」时默认登记禅道；只有明确要求本地 Markdown 或导出文件时才输出本地文件。也支持禅道任务与 Bug 的查询、创建、流转，需求、待办、产品、项目、执行、测试单、用例的新建、修改与状态流转，项目/执行/产品/Bug 进度与个人年度产出统计，需求、待办、测试单、用例、产品计划、项目集、产品、用户、Bug 的只读查询，以及按人查询「我的需求」「我的测试单」。技能未覆盖的接口或功能，可按官方 v1/v2 接口文档（可混用两个版本以适应不同禅道版本）自行扩展。
 compatibility: 需要 Python 3.10 或更高版本，并能访问配置的禅道站点；仅用标准库，无需安装任何第三方依赖。
+license: MIT
+metadata:
+  display_name: 禅道套件
+  display_name_en: ZenTao Kit
+  author: 回声
+  maintainer: dplinger
+  category: productivity
+  repository: https://github.com/dplinger/zentao-kit
 ---
 
 # 禅道套件
