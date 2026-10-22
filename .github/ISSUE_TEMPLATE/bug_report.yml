@@ -1,0 +1,97 @@
+name: 🐞 问题反馈
+description: 技能执行失败、结果不对，或与你所用禅道版本不兼容
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你反馈问题。描述遇到的情况即可，不需要先查明原因；权限问题或不确定是不是 Bug，也欢迎提交。
+
+        如果只是提建议或希望增加功能，请返回上一页选择「💡 提点建议」，直接写下想法即可。
+
+        **这里的内容会公开展示。**请将密码、令牌、内部地址和业务敏感信息替换为 `***`，截图也请遮挡相关内容。
+
+  - type: input
+    id: skill-version
+    attributes:
+      label: 技能版本
+      description: 可选。填写 SkillHub 显示的版本号、Git 提交号或大致安装日期；找不到可以留空
+      placeholder: "例如：1.0.1 / 47f6dd6 / 2026-10-22 安装"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: edition
+    attributes:
+      label: 禅道发行版
+      description: 可选。不清楚时选择「不确定」即可
+      options:
+        - 开源版
+        - 企业版
+        - 旗舰版
+        - IPD 版
+        - 不确定
+    validations:
+      required: false
+
+  - type: input
+    id: zentao-version
+    attributes:
+      label: 禅道版本号
+      description: 可选。通常可在页脚或「后台 → 系统信息」找到；没有查看权限或找不到可以留空
+      placeholder: "21.7.8"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: agent
+    attributes:
+      label: 使用的 AI 工具
+      description: 若选择「其他」，可以在下面的问题描述中补充名称
+      options:
+        - Codex
+        - Claude Code
+        - Cursor
+        - WorkBuddy
+        - Qoder
+        - DeepSeek Harness
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: request
+    attributes:
+      label: 你让它做的事
+      description: 写下你的指令或操作步骤即可，不需要整理完整对话
+      placeholder: "例：帮我把昨天的工时登记到任务 #123 上"
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: 实际发生了什么
+      description: 描述卡在哪一步、结果哪里不对，或粘贴相关报错、拖入截图。没有报错也可以直接描述现象，无需上传整段对话
+      placeholder: "例如：修改任务后名称已更新，但技能提示回查不一致。截图和相关报错如下……"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 你预期看到什么
+      description: 可选。例如「希望先看到预览表格，再确认是否写入」
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已检查文字和截图，未包含密码、令牌、内部地址或业务敏感信息
+          required: true
+        - label: 我在禅道网页上尝试过同样的操作，可以正常完成（未尝试或不确定可不勾选）
+          required: false

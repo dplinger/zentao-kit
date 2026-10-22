@@ -1,0 +1,18 @@
+name: 💡 提点建议
+description: 想加个功能、让操作更顺手，或有使用疑问，都可以在这里聊聊
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎分享你的想法，不需要技术方案，也不用填写版本和报错。
+
+        这里的内容会公开展示，请勿包含密码、令牌、内部地址或业务敏感信息。
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: 你想说什么？
+      description: 可以说说希望增加什么、哪一步不顺手，或者有什么疑问；举个例子也很有帮助
+      placeholder: "例如：希望登记日志时，可以按项目查看当天工时合计。"
+    validations:
+      required: true

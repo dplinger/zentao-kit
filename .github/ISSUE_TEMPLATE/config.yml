@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用文档
+    url: https://github.com/dplinger/zentao-kit#readme
+    about: 安装、登录、各模块用法与权限说明，需要时可以查阅
+  - name: 开发与扩展指南
+    url: https://github.com/dplinger/zentao-kit/blob/main/references/自行扩展.md
+    about: 想参与开发或扩展接口，可以参考这里；功能建议也欢迎直接提 Issue
