@@ -24,6 +24,20 @@ import webbrowser
 from common import SkillError, private_write, read_json, state_dir
 from local_cipher import decrypt, encrypt, protection
 
+
+class EmptyResponse(SkillError):
+    """服务端返回了空响应体。
+
+    企业版部分写接口会回 `201/200` + 空体而不是 JSON（构建创建是常态、多分支产品建 Bug
+    是校验失败被吞）。调用方可以捕获它做回查，不能当作「地址指到网页」或直接判失败。
+    """
+
+    def __init__(self, status, writing):
+        self.status, self.writing = status, writing
+        super().__init__(f"禅道返回空响应（HTTP {status}）。"
+                         + ("写入结果不明，请只读回查后确认，禁止自动重发。" if writing
+                            else "该接口本次没有返回内容，请稍后重试。"))
+
 # 登录成功后如实说明账密存在哪里——保护方式不同，用户该知道差别。
 PROTECTION_LABEL = {"windows-dpapi": "密钥由 Windows 系统凭据保护",
                     "macos-keychain": "密钥由 macOS 登录钥匙串保护",
@@ -300,6 +314,11 @@ def request(base, method, path, token=None, body=None, opener=None, allow_failur
             raw = response.read(16 * 1024 * 1024 + 1)
             if len(raw) > 16 * 1024 * 1024:
                 raise SkillError("接口响应过大，已停止；请缩小查询范围。")
+            if not raw.strip():
+                # 空响应体单独判定：企业版部分写接口在内部校验失败时会吞掉异常，
+                # 返回 201/200 + 空体（台账 D11 建构建、D13 多分支产品建 Bug）。
+                # 若混进下面的 ValueError 分支，会把服务端问题误报成「站点地址有误」。
+                raise EmptyResponse(response.status, method not in ("GET", "HEAD"))
             result = json.loads(raw)
     except urllib.error.HTTPError as exc:
         # 不输出请求对象或整段响应，只带出服务端给用户的业务说明。
@@ -344,8 +363,8 @@ def remember_message():
     return f"已记住账密（{PROTECTION_LABEL.get(protection(), '本机加密保存')}），令牌过期后会自动重登。"
 
 
-def fetch_page(session, path):
-    """用登录保存的 Cookie 读取站点网页或页面 JSON；仅令牌会得到不正确的页面内容。"""
+def page_opener(session):
+    """用保存的网页会话构造只读 opener（带登录 Cookie，不跟随跳转）。"""
     if not session.get('cookies'):
         raise SkillError('AUTH_REQUIRED：缺少网页会话，请重新登录。')
     jar = CookieJar()
@@ -356,10 +375,31 @@ def fetch_page(session, path):
             jar.set_cookie(Cookie(**fields))
     except (TypeError, ValueError):
         raise SkillError('网页会话缓存不可用，请重新登录。') from None
+    return urllib.request.build_opener(NoRedirect(), urllib.request.HTTPCookieProcessor(jar))
+
+
+def media_type(session, path):
+    """探测站点内某个相对路径的真实 Content-Type；不可达返回空串。
+
+    用于挑「页面里真正能显示」的图片地址：同一实例的上传接口返回的 url 未必可用
+    （实测返回 `/zentao/zentao/index.php?...`，子目录重复且返回 HTML 页）。
+    """
+    if not path.startswith('/') or path.startswith('//') or '..' in path:
+        return ''
+    try:
+        with page_opener(session).open(base_url(session['base_url']) + path, timeout=20) as response:
+            head = response.read(16)
+            return str(response.headers.get('Content-Type') or '') if head else ''
+    except (urllib.error.HTTPError, urllib.error.URLError, OSError):
+        return ''
+
+
+def fetch_page(session, path):
+    """用登录保存的 Cookie 读取站点网页或页面 JSON；仅令牌会得到不正确的页面内容。"""
+    opener = page_opener(session)
     base = base_url(session['base_url'])
     if not path.startswith('/') or path.startswith('//') or '..' in path:
         raise SkillError('页面路径不合法。')
-    opener = urllib.request.build_opener(NoRedirect(), urllib.request.HTTPCookieProcessor(jar))
     try:
         with opener.open(base + path, timeout=30) as response:
             raw = response.read(2 * 1024 * 1024 + 1)

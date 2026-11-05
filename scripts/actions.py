@@ -15,6 +15,7 @@ import datetime as dt
 from pathlib import Path
 import re
 
+from auth import EmptyResponse
 from common import (actions_dir, SkillError, brief, digest, missing_error, move_to_trash,
                     plain_text, private_write, read_json, rich_text, stamp, state_dir)
 
@@ -330,7 +331,10 @@ def prepare(plan, client, spec, entity, source_path=None):
                 'before': before,
                 'before_digest': digest(before) if before else None}
     if source_path:
-        snapshot.update(source_path=str(Path(source_path).resolve()), source_digest=digest(plan))
+        # 摘要以磁盘原文为准：prepare 会补齐字段（如 resolvedBuild、update_fill），若拿补齐后的
+        # 内存对象算摘要，submit 再读文件比对必然不相等 → 假失败「草稿已修改」（台账 D10）。
+        snapshot.update(source_path=str(Path(source_path).resolve()),
+                        source_digest=digest(read_json(source_path)))
     review = digest(snapshot)
     private_write(actions_dir() / f'{review}.json', snapshot)
 
@@ -388,7 +392,17 @@ def execute(review, confirmation, client, specs):
         private_write(receipt, {'status': 'inflight', 'entity': snapshot['entity'],
                                 'action': action, 'target': target})
         try:
-            response = client.call(method, endpoint, submitted_body)
+            try:
+                response = client.call(method, endpoint, submitted_body)
+            except EmptyResponse:
+                # 少数接口创建成功也回空体（构建实测如此），不能一律判失败：
+                # 有 recover_create 的实体按业务特征回查，找到唯一新记录才继续校验。
+                if action != 'create' or not spec.get('recover_create'):
+                    raise
+                recovered = spec['recover_create'](client, body)
+                if recovered is None:
+                    raise SkillError('服务端返回空响应，按名称回查也没找到新建记录，请人工核对。') from None
+                response = {spec['wrap']: {'id': recovered}}
             if not isinstance(response, dict):
                 raise SkillError('写接口未返回有效响应。')
             if action == 'create':

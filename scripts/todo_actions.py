@@ -186,7 +186,9 @@ def prepare(plan, client, source_path=None):
                 'todo': todo, 'body': requested, 'requested': requested,
                 'before_digest': digest(before) if before else None}
     if source_path:
-        snapshot.update(source_path=str(Path(source_path).resolve()), source_digest=digest(plan))
+        # 摘要以磁盘原文为准：prepare 会补默认 date，内存态与文件态不一致会假失败（台账 D10）。
+        snapshot.update(source_path=str(Path(source_path).resolve()),
+                        source_digest=digest(read_json(source_path)))
     review = digest(snapshot)
     private_write(actions_dir() / f'{review}.json', snapshot)
     changes = {key: {'before': preview_value(key, field(before, key)),

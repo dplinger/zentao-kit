@@ -7,14 +7,16 @@ from html.parser import HTMLParser
 import json
 from pathlib import Path
 import re
+import urllib.parse
 
-from auth import fetch_page, upload
+from auth import fetch_page, media_type, upload
 from common import (actions_dir, SkillError, account, digest, missing_error, move_to_trash,
                     private_write, read_json, state_dir)
 
 TYPES = {'codeerror', 'config', 'install', 'security', 'performance', 'standard', 'automation', 'designdefect', 'others'}
 RESOLUTIONS = {'bydesign', 'duplicate', 'external', 'fixed', 'notrepro', 'postponed', 'willnotfix', 'tostory'}
-EDIT_FIELDS = {'title', 'severity', 'pri', 'type', 'openedBuild', 'steps', 'project', 'execution', 'story', 'assignedTo'}
+EDIT_FIELDS = {'title', 'severity', 'pri', 'type', 'openedBuild', 'steps', 'project', 'execution',
+               'story', 'assignedTo', 'branch', 'module'}
 FIELDS = {
     # 创建走 v1 接口，产品字段名为 product（v2 用 productID，实测创建时会落空）。
     'create': EDIT_FIELDS | {'product'},
@@ -121,6 +123,26 @@ def attachment_payload(metadata):
             raise SkillError(f'附件内容已变化，请重新预览：{meta["name"]}')
         result.append((meta, content))
     return result
+
+
+def image_src(client, file_id, suffix):
+    """挑出页面里真正能显示图片的相对路径。
+
+    实测（台账 D15）：上传接口返回的 url 是 `/zentao/zentao/index.php?m=file&f=read&t=jpg&fileID=…`
+    —— 子目录重复，直接请求返回 HTML 页而不是图片，浏览器只能显示 alt 文件名文字。
+    真正可用的是伪静态 `file-read-{id}.{ext}`（200 image/jpg）。这里带站点前缀写成**绝对路径**，
+    与禅道自己渲染后的形式一致，不受 Bug 页面 URL 层级影响。依次探测，选第一个真返回图片的。
+    """
+    prefix = urllib.parse.urlparse(client.base).path.rstrip('/')
+    # 探测走 media_type，它接收的是相对站点 base 的路径（不含 /zentao 一级）。
+    probes = (f'/file-read-{file_id}.{suffix}',
+              f'/index.php?m=file&f=read&t={suffix}&fileID={file_id}')
+    session = getattr(client, 'session', None)
+    if session:
+        for probe in probes:
+            if media_type(session, probe).startswith('image/'):
+                return prefix + probe
+    return f'{prefix}/file-read-{file_id}.{suffix}'
 
 
 def merge_images(steps, embedded):
@@ -328,7 +350,7 @@ def validate(action, fields):
     for key in ('severity', 'pri'):
         if key in fields and (isinstance(fields[key], bool) or fields[key] not in (1, 2, 3, 4)):
             raise SkillError(f'{key} 必须是 1 至 4。')
-    for key in ('product', 'project', 'execution', 'story'):
+    for key in ('product', 'project', 'execution', 'story', 'branch', 'module'):
         if key in fields and (isinstance(fields[key], bool) or not str(fields[key]).isdigit()):
             raise SkillError(f'{key} 必须是非负整数。')
     for key in ('openedBuild', 'mailto'):
@@ -347,6 +369,29 @@ def validate(action, fields):
         raise SkillError('v2 解决接口文档未提供重复 Bug 编号字段，暂不能选择 duplicate。')
     if action == 'update' and not fields:
         raise SkillError('修改 Bug 至少指定一个字段。')
+
+
+def product_type(client, product):
+    """读取产品类型，用于判断是否多分支产品（type=branch）。"""
+    try:
+        value = client.call('GET', f'v1/products/{product}')
+    except SkillError:
+        return ''
+    return str(value.get('type') or '') if isinstance(value, dict) else ''
+
+
+def branch_of_product(client, product):
+    """多分支产品未指定分支时，按该产品已有 Bug 推断；查不到退回主干 0。"""
+    try:
+        value = client.call('GET', f'v2/products/{product}/bugs?browseType=all&limit=20')
+    except SkillError:
+        return 0
+    rows = value.get('bugs') if isinstance(value, dict) else None
+    for row in rows if isinstance(rows, list) else []:
+        number = row.get('branch') if isinstance(row, dict) else None
+        if str(number or '').isdigit():
+            return int(number)
+    return 0
 
 
 def update_notice(action, requested, before):
@@ -382,6 +427,7 @@ def prepare(plan, client, source_path=None):
     before = None if bug_id is None else detail(client, bug_id)
     # 解决版本为服务端必填但网页显示可选，缺失时按 openedBuild 优先、trunk 兜底的规则自动补齐。
     build_notice = ''
+    branch_notice = ''
     if action == 'resolve' and not requested.get('resolvedBuild') and bug_id is not None:
         picker = resolved_build_options(client, bug_id)
         requested['resolvedBuild'] = picker['recommended']
@@ -390,6 +436,19 @@ def prepare(plan, client, source_path=None):
                         + '、'.join(it['value'] for it in picker['options']) + '）；如需更改请指定。')
     if action == 'create':
         product = ident(requested['product'])
+        # 多分支产品（type=branch）建 Bug 必须带 project/execution，否则服务端把校验异常吞成
+        # 201 空响应、实际不落库；branch 缺省时按该产品已有 Bug 推断（台账 D13）。
+        if product_type(client, product) == 'branch':
+            missing = [key for key in ('project', 'execution') if not requested.get(key)]
+            if missing:
+                raise SkillError('产品 ' + str(product) + ' 是多分支产品，创建 Bug 必须同时指定 '
+                                 + '、'.join(missing)
+                                 + '；缺少这些归属时服务端会静默失败（返回空响应且不落库）。')
+            requested.setdefault('module', 0)
+            if not requested.get('branch'):
+                requested['branch'] = branch_of_product(client, product)
+                branch_notice = (f"分支未指定，已按该产品已有 Bug 推断为 {requested['branch']}；"
+                                 "如属其它分支请显式给出。")
         body = requested.copy()
     else:
         product = ident(before['product'])
@@ -411,7 +470,10 @@ def prepare(plan, client, source_path=None):
                 'before_confirmed': before.get('confirmed') if before else None,
                 'attachments': attachments}
     if source_path:
-        snapshot.update(source_path=str(Path(source_path).resolve()), source_digest=digest(plan))
+        # 摘要以磁盘原文为准：prepare 会补齐 resolvedBuild，若拿补齐后的内存对象算摘要，
+        # submit 再读文件比对必然不相等 → 假失败「Bug 草稿已修改」（台账 D10）。
+        snapshot.update(source_path=str(Path(source_path).resolve()),
+                        source_digest=digest(read_json(source_path)))
     review = digest(snapshot)
     private_write(actions_dir() / f'{review}.json', snapshot)
     return {'status': 'preview_only', 'review': review, 'action': action, 'bug': bug_id,
@@ -423,14 +485,30 @@ def prepare(plan, client, source_path=None):
             'changes': {k: redact(v) if isinstance(v, str) else v for k, v in requested.items()},
             'attachments': [{'name': item['name'], 'bytes': item['bytes'],
                              'sha256': item['sha256'][:8]} for item in attachments],
-            'notice': ' '.join(x for x in (attachment_notice(attachments, update_notice(action, requested, before)), build_notice) if x),
+            'notice': ' '.join(x for x in (attachment_notice(attachments, update_notice(action, requested, before)), build_notice, branch_notice) if x),
             'message': '请核对 Bug 操作；确认无误后回复“确认执行”。'}
+
+
+def steps_signature(value):
+    """重现步骤的比较指纹：正文纯文本 + 图片编号集合。
+
+    不能直接比 HTML 字符串：服务端保存时会规范化富文本（实测给 `<a>` 自动补
+    `rel="noreferrer noopener"`），也可能改写图片地址，全等比较必然误报
+    「写后状态与预览不一致」，而数据其实写对了（台账 D15）。图片按 fileID 归一，
+    地址写成伪静态还是 `index.php?m=file` 都不影响。
+    """
+    text = html.unescape(str(value or ''))
+    ids = {a or b for a, b in re.findall(r'fileID=(\d+)|file-read-(\d+)', text)}
+    body = re.sub(r'<[^>]+>', ' ', text)
+    return re.sub(r'\s+', ' ', body).strip(), ids
 
 
 def same(actual, expected, key):
     if key in ('assignedTo',):
         return account(actual.get(key)) == expected
-    if key in ('title', 'steps'):
+    if key == 'steps':
+        return steps_signature(actual.get(key)) == steps_signature(expected)
+    if key == 'title':
         return html.unescape(str(actual.get(key) or '')).strip() == html.unescape(str(expected or '')).strip()
     if key == 'openedBuild':
         actual_builds = {item.strip() for item in str(actual.get(key) or '').split(',') if item.strip()}
@@ -484,7 +562,8 @@ def execute(review, confirmation, client):
                              'url': str(response.get('url') or ''), 'suffix': meta['suffix']})
         if uploaded:
             body['steps'] = merge_images(body.get('steps') or (before or {}).get('steps'),
-                                         [(item['id'], item['url'], item['suffix']) for item in uploaded])
+                                         [(item['id'], image_src(client, item['id'], item['suffix']),
+                                           item['suffix']) for item in uploaded])
             requested['steps'] = body['steps']
         private_write(receipt, {'status': 'inflight', 'action': action, 'bug': bug_id,
                                 'attachments': uploaded})
@@ -522,9 +601,12 @@ def execute(review, confirmation, client):
                 if drifted:
                     raise SkillError('修改 Bug 后以下未请求字段被改变：' + '、'.join(drifted) + '。')
             if uploaded:
-                # 内嵌图片以 fileID 出现在重现步骤里，逐张核对，避免只写了一半。
+                # 内嵌图片在重现步骤里以伪静态 file-read-{id}.{ext}（或老式 fileID={id}）出现，
+                # 逐张核对，避免只写了一半。两种形式都要认，否则必然误报「图片未出现」。
                 steps_now = str(actual.get('steps') or '')
-                missing = [item['name'] for item in uploaded if f'fileID={item["id"]}' not in steps_now]
+                missing = [item['name'] for item in uploaded
+                           if f'file-read-{item["id"]}.' not in steps_now
+                           and f'fileID={item["id"]}' not in steps_now]
                 if missing:
                     raise SkillError('内嵌图片未出现在重现步骤：' + '、'.join(missing))
             if action == 'resolve':

@@ -617,7 +617,7 @@ def main():
     p.add_argument('--limit', type=int, default=20, help='最多列出条数，默认 20')
     p.add_argument('--all', action='store_true', help='列出全部命中记录')
     for entity, label in (('product', '产品'), ('project', '项目'), ('execution', '执行'),
-                          ('testtask', '测试单'), ('testcase', '用例')):
+                          ('testtask', '测试单'), ('testcase', '用例'), ('build', '构建')):
         p = sub.add_parser(f'{entity}-prepare', help=f'预览新建或修改{label}')
         p.add_argument('--plan', required=True)
         p = sub.add_parser(f'{entity}-submit', help=f'确认{label}预览后执行一次并回查')
@@ -749,6 +749,11 @@ def main():
         if kind == 'prepare':
             return test_prepare(read_json(args.plan), client, entity, args.plan)
         return test_execute(args.review, args.confirm, client)
+    if args.command.rsplit('-', 1)[0] == 'build':
+        from build_actions import execute as build_execute, prepare as build_prepare
+        if args.command == 'build-prepare':
+            return build_prepare(read_json(args.plan), client, 'build', args.plan)
+        return build_execute(args.review, args.confirm, client)
     if args.command == "whoami":
         return {"account": client.account, "base_url": client.base}
     if args.command == "candidates":

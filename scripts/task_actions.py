@@ -11,8 +11,15 @@ from common import (actions_dir, SkillError, digest, missing_error, move_to_tras
 FIELDS = ('name', 'type', 'assignedTo', 'estStarted', 'deadline', 'pri', 'estimate', 'module', 'story', 'desc')
 TYPES = {'design', 'devel', 'request', 'test', 'study', 'discuss', 'ui', 'affair', 'misc'}
 LABELS = {'create': '新建任务', 'update': '修改任务', 'finish': '完成任务', 'close': '关闭任务'}
-# 修改任务不应改变的稳定字段；请求本身包含的字段仍按用户期望值核对。
-UPDATE_INVARIANTS = ('project', 'execution', 'status', 'assignedTo', 'estimate', 'left', 'consumed')
+# 修改任务时「绝不该被悄悄改掉」的字段：归属、状态、指派，以及记录是否被删。
+# 这类变了等于记录被搬家、状态被篡改或记录消失，必须判失败并保留收据。
+GUARDED_FIELDS = ('project', 'execution', 'module', 'story', 'status', 'assignedTo', 'deleted')
+# 其余字段受服务端联动影响（改预计工时会把剩余工时一起改、完工会把剩余归零……），
+# 联动枚举不完，把它们也当硬约束必然误报（台账 D12）。这些变化只作提示，不影响成败判定。
+# 服务端自动维护的统计与时间戳，变化属正常，既不判定也不提示，否则提示会被噪音淹没。
+IGNORED_FIELDS = {'lastEditedBy', 'lastEditedDate', 'openedBy', 'openedDate', 'assignedDate',
+                  'progress', 'subStatus', 'delay', 'teamCount', 'childCount',
+                  'activatedCount', 'mailto', 'notifyEmail'}
 
 
 def detail(client, task, version='v1'):
@@ -115,7 +122,9 @@ def prepare(plan, client, source_path=None):
                 'task': task, 'body': body, 'before': before, 'requested': requested,
                 'execution': {'id': execution['id'], 'name': execution.get('name', ''), 'project': project} if execution else None}
     if source_path:
-        snapshot.update(source_path=str(Path(source_path).resolve()), source_digest=digest(plan))
+        # 摘要以磁盘原文为准，避免 prepare 补齐字段后与文件态不一致而假失败（台账 D10）。
+        snapshot.update(source_path=str(Path(source_path).resolve()),
+                        source_digest=digest(read_json(source_path)))
     review = digest(snapshot)
     private_write(actions_dir() / f'{review}.json', snapshot)
     changes = {key: {'before': field(before, key) if before else None, 'after': body[key]} for key in requested}
@@ -137,10 +146,32 @@ def matches(actual, expected, key):
 
 
 def drifted_fields(before, actual, requested):
-    """返回修改任务后发生意外变化的稳定字段。"""
-    return [key for key in UPDATE_INVARIANTS
+    """返回修改任务后被悄悄改掉的关键字段（归属、状态、指派）。"""
+    return [key for key in GUARDED_FIELDS
             if key not in requested and key in before
             and not matches(actual, field(before, key), key)]
+
+
+def side_effects(before, actual, requested):
+    """返回服务端顺带调整的字段，只作提示，不参与成败判定。
+
+    扫描范围是**全字段**而不是只扫业务白名单：只按白名单扫的话，没列进去的字段
+    （`realStarted`、`closedDate` 之类）发生变化会被静默放过，用户永远看不到
+    （台账 D12 追问）。归属与请求字段已在别处核对，这里跳过；服务端自动维护的
+    统计/时间戳见 IGNORED_FIELDS。
+    """
+    result = {}
+    keys = (set(before) | set(actual)) - set(GUARDED_FIELDS) - set(requested) - IGNORED_FIELDS
+    for key in sorted(keys):
+        old, new = field(before, key), field(actual, key)
+        if old is None and new is None:
+            continue
+        # 嵌套结构（如 products、teams）变化噪音太大，且不属于本接口写入范围，不提示。
+        if isinstance(old, (dict, list)) or isinstance(new, (dict, list)):
+            continue
+        if not matches(actual, old, key):
+            result[key] = {'before': old, 'after': new}
+    return result
 
 
 def execute(review, confirmation, client):
@@ -164,6 +195,7 @@ def execute(review, confirmation, client):
             raise SkillError('任务自预览后发生变化，请重新生成预览。')
         endpoint = 'v2/tasks' if action == 'create' else f'v2/tasks/{task}' + (f'/{action}' if action in ('finish', 'close') else '')
         private_write(receipt_path, {'status': 'inflight', 'action': action, 'task': task})
+        side = {}
         try:
             response = client.call('POST' if action == 'create' else 'PUT', endpoint, body)
             # 业务成功不能仅凭 HTTP 200 判断，创建必须取得返回的新编号。
@@ -183,10 +215,17 @@ def execute(review, confirmation, client):
                 else:
                     drifted = drifted_fields(snapshot['before'], actual, snapshot['requested'])
                     if drifted:
-                        raise SkillError('修改任务后以下未请求字段被改变：' + '、'.join(drifted) + '。')
+                        raise SkillError('修改任务后以下关键字段被改变：' + '、'.join(drifted) + '。')
+                    # 非关键字段的变化只提示，不判失败：服务端联动枚举不完（台账 D12）。
+                    side = side_effects(snapshot['before'], actual, snapshot['requested'])
             elif action == 'finish':
+                # 完工时服务端会把剩余工时清零，但那部分不计入累计消耗（台账 D9）：
+                # consumed 可能保持原值，也可能叠加本次消耗，两种都算正常收敛；
+                # 只有明显异常（被归零、超过本次增量）才判失败，避免把成功报成失败。
                 valid = actual.get('status') == 'done' and all(matches(actual, body[k], k) for k in ('assignedTo', 'realStarted', 'finishedDate'))
-                valid = valid and hours(actual.get('consumed', -1)) == hours(snapshot['before']['consumed']) + hours(body['currentConsumed'])
+                base = hours(snapshot['before']['consumed'])
+                added = hours(body['currentConsumed'])
+                valid = valid and hours(actual.get('consumed', -1)) in (base, base + added)
             else:
                 valid = actual.get('status') == 'closed'
             if not valid:
@@ -212,5 +251,11 @@ def execute(review, confirmation, client):
             move_to_trash(receipt_path, state_root)
         except OSError:
             cleanup = 'pending'
+        notice = None
+        if side:
+            notice = ('服务端同时调整了：'
+                      + '、'.join(f'{key} {value["before"]} → {value["after"]}' for key, value in side.items())
+                      + '。这不影响本次操作；如需改回请告诉我。')
         return {'status': 'verified', 'action': LABELS[action], 'task': task,
-                'url': client.base + f'/task-view-{task}.html', 'cleanup': cleanup}
+                'url': client.base + f'/task-view-{task}.html', 'cleanup': cleanup,
+                'notice': notice}
