@@ -16,7 +16,7 @@ from pathlib import Path
 import re
 
 from common import (actions_dir, SkillError, brief, digest, missing_error, move_to_trash,
-                    plain_text, private_write, read_json, rich_text, stamp, state_dir)
+                    plain_key, private_write, read_json, rich_text, stamp, state_dir)
 
 LABELS = {'create': '新建待办', 'update': '修改待办', 'finish': '完成待办', 'activate': '激活待办'}
 STATUS_TEXT = {'wait': '未开始', 'doing': '进行中', 'done': '已完成', 'closed': '已关闭'}
@@ -121,7 +121,7 @@ def field(value, key):
 def matches(actual, expected, key):
     value = field(actual, key)
     if key == 'desc':
-        return plain_text(value) == plain_text(expected)
+        return plain_key(value) == plain_key(expected)
     if key in ('begin', 'end'):
         return clock_value(value) == clock_value(expected)
     if key == 'private':

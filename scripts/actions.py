@@ -17,7 +17,7 @@ import re
 
 from auth import EmptyResponse
 from common import (actions_dir, SkillError, brief, digest, missing_error, move_to_trash,
-                    plain_text, private_write, read_json, rich_text, stamp, state_dir)
+                    plain_key, private_write, read_json, rich_text, stamp, state_dir)
 
 TEXT, TEXTS, DATE, ID, IDS, ACCOUNT, ACCOUNTS, ENUM, INT, STEPS = (
     'text', 'texts', 'date', 'id', 'ids', 'account', 'accounts', 'enum', 'int', 'steps')
@@ -228,7 +228,7 @@ def matches(actual, expected, key, meta):
     value = field(actual, key)
     kind = meta['type']
     if key in ('desc', 'precondition'):
-        return plain_text(value) == plain_text(expected)
+        return plain_key(value) == plain_key(expected)
     if kind == DATE:
         return stamp(value)[:8] == stamp(expected)[:8]
     if kind in (ID, INT):

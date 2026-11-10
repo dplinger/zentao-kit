@@ -14,7 +14,7 @@ from pathlib import Path
 import re
 
 from common import (actions_dir, SkillError, brief, digest, missing_error, move_to_trash,
-                    plain_text, private_write, read_json, rich_text, state_dir)
+                    plain_key, private_write, read_json, rich_text, state_dir)
 
 LABELS = {'create': '新建需求', 'update': '修改需求', 'change': '变更需求',
           'close': '关闭需求', 'activate': '激活需求'}
@@ -177,7 +177,7 @@ def preview_value(key, value):
 def matches(actual, expected, key):
     value = field(actual, key)
     if key in ('spec', 'verify'):
-        return plain_text(value) == plain_text(expected)
+        return plain_key(value) == plain_key(expected)
     if key in ('pri', 'estimate', 'product', 'plan', 'module', 'duplicateStory'):
         try:
             return float(value or 0) == float(expected or 0)

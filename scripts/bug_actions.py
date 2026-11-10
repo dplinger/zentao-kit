@@ -11,7 +11,7 @@ import urllib.parse
 
 from auth import fetch_page, media_type, upload
 from common import (actions_dir, SkillError, account, digest, missing_error, move_to_trash,
-                    private_write, read_json, state_dir)
+                    plain_key, private_write, read_json, state_dir)
 
 TYPES = {'codeerror', 'config', 'install', 'security', 'performance', 'standard', 'automation', 'designdefect', 'others'}
 RESOLUTIONS = {'bydesign', 'duplicate', 'external', 'fixed', 'notrepro', 'postponed', 'willnotfix', 'tostory'}
@@ -493,14 +493,14 @@ def steps_signature(value):
     """重现步骤的比较指纹：正文纯文本 + 图片编号集合。
 
     不能直接比 HTML 字符串：服务端保存时会规范化富文本（实测给 `<a>` 自动补
-    `rel="noreferrer noopener"`），也可能改写图片地址，全等比较必然误报
-    「写后状态与预览不一致」，而数据其实写对了（台账 D15）。图片按 fileID 归一，
+    `rel="noreferrer noopener"`、把裸 URL 包成 `<a>`、把 `<img>` 包进 `<p>`），
+    全等比较必然误报「写后状态与预览不一致」，而数据其实写对了（台账 D15、D16）。
+    正文走 `plain_key`（剥标签不占位、去全部空白），图片按 fileID 归一，
     地址写成伪静态还是 `index.php?m=file` 都不影响。
     """
-    text = html.unescape(str(value or ''))
+    text = str(value or "")
     ids = {a or b for a, b in re.findall(r'fileID=(\d+)|file-read-(\d+)', text)}
-    body = re.sub(r'<[^>]+>', ' ', text)
-    return re.sub(r'\s+', ' ', body).strip(), ids
+    return plain_key(text), ids
 
 
 def same(actual, expected, key):
@@ -615,7 +615,13 @@ def execute(review, confirmation, client):
                 valid = valid and all(same(actual, value, key) for key, value in body.items()
                                       if key not in ('comment', 'mailto', 'resolution'))
             if not valid:
-                raise SkillError('写后 Bug 状态与预览不一致。')
+                # 报出具体字段：笼统的「状态与预览不一致」会把正文差异伪装成状态问题（台账 D16）。
+                failed = [key for key, value in requested.items()
+                          if key != 'product' and not same(actual, value, key)]
+                if action in STATUS and actual['status'] != STATUS[action]:
+                    failed.insert(0, 'status=' + str(actual['status'])
+                                  + '（期望 ' + str(STATUS[action]) + '）')
+                raise SkillError('写后 Bug 回查不一致：' + ('、'.join(failed) or 'product') + '。')
         except SkillError as exc:
             # 让字段漂移、状态不符等具体原因直接呈现，而不是被笼统的“结果不明”盖住。
             private_write(receipt, {'status': 'unknown', 'action': action, 'bug': bug_id})

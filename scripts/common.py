@@ -41,6 +41,17 @@ def plain_text(value):
     return re.sub(r"\s+", " ", html.unescape(text)).strip()
 
 
+def plain_key(value):
+    """比对专用纯文本：标签剥成空串、反转义、去掉全部空白。
+
+    用途与 `plain_text` 不同：预览要保留词间空格方便阅读，写后比对只看文字本身。
+    服务端会规范化富文本——裸 URL 转成链接、图片包进段落、链接补属性（D15、D16），
+    任何逐字比较都会把这些改写当成「写歪了」；去掉空白后，改写只剩标签差异，不会误报。
+    """
+    text = html.unescape(re.sub(r"<[^>]+>", "", str(value or "")))
+    return re.sub(r"\s+", "", text)
+
+
 def rich_text(value):
     """纯文本包一层段落；已含标签的原样保留。禅道的描述字段都是富文本编辑器。"""
     text = str(value or "")
