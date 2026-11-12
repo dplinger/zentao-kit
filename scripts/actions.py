@@ -343,8 +343,11 @@ def prepare(plan, client, spec, entity, source_path=None):
             return None
         return brief(value) if key in ('desc', 'precondition') else value
 
+    # 预览要覆盖「用户给的」和「脚本补的」两类字段：补全的必填项（如构建的所属应用）
+    # 若不在预览里出现，用户就没机会核对，等于黑箱。
+    keys = list(plan['fields']) + [key for key in body if key not in plan['fields']]
     changes = {key: {'before': show(key, field(before, key)), 'after': show(key, body[key])}
-               for key in plan['fields']}
+               for key in keys}
     return {'status': 'preview_only', 'review': review, 'entity': entity,
             'action': ACTION_LABEL[action] + spec['label'], 'id': target,
             'name': field(before, 'name') if before else body.get('name'),
@@ -380,6 +383,10 @@ def execute(review, confirmation, client, specs):
             # 部分集合的路径参数只认路径（如执行的 project），放 body 会被服务端覆盖成 0。
             for key in spec.get('path_args', ()):
                 endpoint = endpoint.replace('{' + key + '}', str(body[key]))
+            # 同一实体在 v1/v2 的字段名可能不同（构建：v1 认 execution，v2 认 executionID）。
+            if spec.get('create_wire'):
+                submitted_body = {(spec['create_wire'].get(key, key)): value
+                                  for key, value in body.items()}
         else:
             method = 'PUT'
             # 少数实体的修改端点与详情端点不在同一版本：测试单 v1 没有 PUT（返回 200 空响应，
@@ -401,7 +408,11 @@ def execute(review, confirmation, client, specs):
                     raise
                 recovered = spec['recover_create'](client, body)
                 if recovered is None:
-                    raise SkillError('服务端返回空响应，按名称回查也没找到新建记录，请人工核对。') from None
+                    # 201 + 空体不等于成功：服务端可能把缺必填的请求静默丢弃（台账 D11/D17）。
+                    # 文案不能只说「没找到」，否则容易被误读成权限问题。
+                    raise SkillError('服务端返回空响应，按编号回查也没有找到新建记录：可能是缺少必填'
+                                     '字段被服务端静默丢弃（这类接口不报错），也可能确实未写入。'
+                                     '请先按编号人工核对，确认没有新记录再决定是否重试。') from None
                 response = {spec['wrap']: {'id': recovered}}
             if not isinstance(response, dict):
                 raise SkillError('写接口未返回有效响应。')
