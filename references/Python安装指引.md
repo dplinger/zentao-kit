@@ -1,20 +1,21 @@
 # Python 环境检查与安装指引
 
-## 先检查已有环境
+**这是兜底文档，不是流程第一步。** 正常流程直接用宿主内置的 Python 解释器执行脚本（见 `SKILL.md`），**不做任何预先探测**：不跑 `Get-Command`、`where.exe`、`--version`，不列目录。只有当内置解释器执行 `whoami` 失败时，才按本文档依次查找；候选都不可用时先问用户要现成路径，用户机器上确实没有，再走下面的安装指引。
+
+## 兜底：内置解释器不可用时
 
 按以下顺序检查，找到可用解释器就停止查找并继续任务：
 
 1. **当前宿主提供的运行时**：优先使用环境说明或宿主工具返回的 Python 绝对路径。在 Codex 桌面端，若可调用 `load_workspace_dependencies`，使用其返回的 Python executable 路径；工具不可用时继续下一项，不把它作为必需依赖。
 2. **系统命令**：检查 `python`、Windows 的 `py -3`、macOS/Linux 的 `python3`，以及用户明确提供的解释器路径。
-3. **已知宿主位置**：在 Codex 的 Windows 本机场景，上述方式均不可用时，可检查当前用户主目录下 `.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe`。这是已观察到的候选路径，并非所有版本或系统都保证存在；不写死用户名、不扫描全盘，不猜测其他工具的私有路径。
 
-每个候选都实际运行下方验证：版本不低于3.10，且 `sqlite3`、`ssl` 可导入。文件存在、命令指向应用商店入口或仅能输出版本，均不足以认定可用。宿主自带运行时不一定加入 PATH（命令搜索路径）；系统 `python` 不可用，不代表用户需要安装 Python。仅在上述候选均不可用后，才展示安装指引。
+每个候选都实际运行下方验证：版本不低于3.10，且 `sqlite3`、`ssl` 可导入。文件存在、命令指向应用商店入口或仅能输出版本，均不足以认定可用。宿主自带运行时不一定加入 PATH（命令搜索路径）；系统 `python` 不可用，不代表用户需要安装 Python。两项都不可用时，先请用户提供自己已装好的解释器路径（用户通常知道装在哪）；用户机器上确实没有可用解释器，才展示下面的安装指引。
 
 ```text
 python -c "import sys, sqlite3, ssl; print(sys.executable); print(sys.version); assert sys.version_info >= (3, 10), '需要 Python 3.10+'"
 ```
 
-下文及 SKILL.md 中的 `python` 均应替换为通过验证的解释器绝对路径；Windows 的带引号路径在 PowerShell 中用 `&` 调用。保留验证返回的 `sys.executable` 供本次流程使用，不修改系统 PATH，不安装额外依赖。只做环境检查时不用询问用户是否安装过 Python。
+下文中的 `python` 指通过验证的解释器绝对路径；`SKILL.md` 里的 `python` 在走完兜底、找到解释器后同样替换为该绝对路径（内置解释器能直接跑通时不涉及这一步）。Windows 的带引号路径在 PowerShell 中用 `&` 调用。保留验证返回的 `sys.executable` 供本次流程使用，不修改系统 PATH，不安装额外依赖。只做环境检查时不用询问用户是否安装过 Python。
 
 ## 环境不可用时向用户展示
 

@@ -28,7 +28,7 @@
 **测试单的创建与修改均已真实跑通**：创建走 v1、修改走 v2，回查字段一致。
 """
 
-from actions import (ACCOUNT, BOTH, CREATE, DATE, ENUM, ID, INT, STEPS, TEXT, TEXTS, UPDATE,
+from actions import (ACCOUNT, ACCOUNTS, BOTH, CREATE, DATE, ENUM, ID, INT, STEPS, TEXT, TEXTS, UPDATE,
                      execute as _execute, prepare as _prepare)
 from bug_actions import builds as list_builds
 from common import SkillError
@@ -66,6 +66,11 @@ SPECS = {
             'begin': {'type': DATE, 'required': BOTH},
             'end': {'type': DATE, 'required': BOTH},
             'owner': {'type': ACCOUNT},
+            # 参与人：zt_testtask.members 存逗号分隔账号串，页面「参与人」多选框写它。
+            # 官方 v2「创建测试单」文档没列这个字段，但测试单列表响应里明确有 members，
+            # 且 edit 路径（v2 PUT 复用的就是它）有 `$task->members = trim($task->members, ',')`
+            # 专门处理——所以修改能写、创建文档未列。回查按逗号/空白切分做子集比对。
+            'members': {'type': ACCOUNTS},
             'type': {'type': TEXTS},
             'pri': {'type': ENUM, 'values': ('1', '2', '3', '4')},
             # v2 文档给出的取值；服务端对非法值会拒绝，本地先拦一道。
